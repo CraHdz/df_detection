@@ -1,0 +1,63 @@
+is_process_video : true
+log_dir : "./log/logfile/"
+mode : train
+device : "cuda"
+
+is_DataParallel : false
+device_ids : [0, 1]
+tensorb_log : "./tensorb_log/"
+
+is_DDP : false
+model_save_path : "./network/ckp/"
+
+is_load_ckp : false
+ckp_file : "./network/ckp/"
+
+epoches: 10000
+
+metalearning :
+    meta_train_batch_size : 32
+    meta_test_batch_size : 16
+
+    meta_train_lr : 0.001
+    meta_train_weight_decay : 0 
+    meta_train_momentum : 0
+
+    meta_lr : 0.0001
+    meta_momentum : 0.9
+    meta_dampening : 0.5
+
+    alpha : 0.1
+
+    MSTX :
+        t_size : 32
+        img_size : 224
+        vst_weight_path : "/home/huangdz/workspace/df_detection/weights/video_swin_transformer.pth"  
+video_process :
+    video_path :  "/home/huangdz/workspace/faceforensics++/original_sequences/youtube/c23/videos/"
+    # video_path :  "/home/huangdz/workspace/faceforensics++/manipulated_sequences/Face2Face/c23/videos"
+    # video_path :  "/home/huangdz/workspace/faceforensics++/manipulated_sequences/FaceSwap/c23/videos"
+    # video_path :  "/home/huangdz/workspace/faceforensics++/manipulated_sequences/Deepfakes/c23/videos"
+    # video_path :  "/home/huangdz/workspace/faceforensics++/manipulated_sequences/NeuralTextures/c23/videos"
+
+    save_imgs_path : "./FF++/raw/"
+    segment_num : 1
+    sample_num : 32
+    file_suffix : [".mp4", ]
+
+vst_net : 
+    checkpoint : "./weights/"
+
+train :
+    meta_train_dataset : ["./FF++/raw", "./FF++/face2face", "./FF++/faceswap", "./FF++/neuraltextures"]
+    meta_test_dataset: ["./FF++/raw", "./FF++/face2face", "./FF++/faceswap", "./FF++/neuraltextures", "./FF++/deepfakes"]
+    train_batch_size : 1
+    test_batch_size : 1
+
+test :
+    dataset : []
+
+valid :
+    batch_size : 1
+
+    
