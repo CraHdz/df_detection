@@ -674,7 +674,7 @@ class SwinTransformer3D(nn.Module):
 
 
 class vidlv_detection_net(nn.Module):
-    def __init__(self, vst_weigtt_path=None):
+    def __init__(self, vids_size, vst_weigtt_path=None):
         super().__init__()
 
         self.vst_net = SwinTransformer3D()
@@ -691,7 +691,7 @@ class vidlv_detection_net(nn.Module):
             self.vst_net.load_state_dict(new_state_dict)
 
         self.conv =  nn.Sequential(
-            nn.Conv2d(16, 4, 7, 1, 0),
+            nn.Conv2d(int(vids_size / 2), 4, 7, 1, 0),
             nn.BatchNorm2d(4)
         )
         self.initialize_weights(self.conv)
@@ -707,9 +707,9 @@ class vidlv_detection_net(nn.Module):
     def initialize_weights(self, module):
         for m in module.modules():        
             if isinstance(m, nn.Linear):
-                torch.nn.init.xavier_uniform_(m.weight)
+                torch.nn.init.xavier_uniform_(m.weight.data)
                 if m.bias is not None:
-                    torch.nn.init.constant_(m.bias, 0)
+                    torch.nn.init.constant_(m.bias.data, 0)
             elif isinstance(m, nn.Conv2d):
                 torch.nn.init.xavier_normal_(m.weight.data)
                 if m.bias is not None:
@@ -732,10 +732,10 @@ def get_parameter_number(net):
     return {'Total': total_num, 'Trainable': trainable_num}
 
 if __name__ == "__main__":
-    net = vidlv_detection_net(vst_weigtt_path="/home/huangdz/workspace/df_detection/weights/swin_tiny_patch244_window877_kinetics400_1k.pth")
+    net = vidlv_detection_net(16, vst_weigtt_path="/home/huangdz/workspace/df_detection/weights/swin_tiny_patch244_window877_kinetics400_1k.pth")
     print(get_parameter_number(net))
     # optim = torch.optim.Adam(net.parameters(), lr=0.001)
-    for i in range(100):
-        input = torch.randn(1, 3, 32, 224, 224)
+    for i in range(2):
+        input = torch.randn(1, 3, 16, 224, 224)
         result = net(input)
         print(result.shape)

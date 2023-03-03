@@ -77,7 +77,7 @@ class feat_extra_net(nn.Module):
 
         self.block1 = nn.Sequential(
                 nn.Conv2d(3, 96, 3, 1, 1, bias=False),
-                nn.BatchNorm2d(64),
+                nn.BatchNorm2d(96),
                 nn.ReLU(inplace=True)
             )
 

@@ -3,3 +3,7 @@ FF++
 cele_df
 weights
 tensorb_log
+network/ckp
+network/ckp_1
+**/__pycache__/
+__pycache__/

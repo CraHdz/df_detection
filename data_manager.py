@@ -153,7 +153,7 @@ class Meta_Train_Dataset(data.Dataset):
         self.vids_pkg = sorted(os.listdir(self.imgs_path))
         
         if self.mode == "train":
-            self.vids_pkg = self.vids_pkg[ : 448]
+            self.vids_pkg = self.vids_pkg[:700]
         elif self.mode == "test":
             self.vids_pkg = self.vids_pkg[448:]
         # for dbtype in dbtype_list:
@@ -166,9 +166,10 @@ class Meta_Train_Dataset(data.Dataset):
 
         vid_imgs = sorted(os.listdir(vid_pkg_path))
         
-        if len(vid_imgs) != self.vids_pkg_size:
+        if len(vid_imgs) < self.vids_pkg_size:
             logger.error(vid_pkg_path + " is not have enghout image!!!")
             sys.exit()
+        vid_imgs = vid_imgs[:self.vids_pkg_size]
         
         pkg = []
         for vid_img in vid_imgs:
@@ -178,7 +179,52 @@ class Meta_Train_Dataset(data.Dataset):
             pkg.append(inst)
         #the data form is T C H W
         pkg = torch.stack(pkg, dim=0)
-        label = torch.zeros(1, dtype=torch.float32) if "raw" in self.imgs_path else torch.ones(1, dtype=torch.float32)
+        label = 0 if "raw" in self.imgs_path else 1
+        return pkg, label
+
+        
+
+    def __len__(self):
+        return len(self.vids_pkg)
+
+
+class Nor_Dataset(data.Dataset):
+    def __init__(self, imgs_path, mode, vids_pkg_size=16):
+        self.mode = mode
+        self.imgs_path = imgs_path
+        self.vids_pkg_size = vids_pkg_size
+        self.vids_pkg = []
+        self.labels = []
+        for vids_path in self.imgs_path:
+            label = 0 if "raw" in vids_path else 1
+            vids_pkg = sorted(list(map(lambda x: os.path.join(vids_path, x), os.listdir(vids_path))))
+            self.vids_pkg.extend(vids_pkg)
+            self.labels.extend([label for i in range(len(vids_pkg))])
+
+        
+        if self.mode == "train":
+            self.vids_pkg = self.vids_pkg[:700]
+        elif self.mode == "test":
+            self.vids_pkg = self.vids_pkg[:]
+
+    def __getitem__(self, index):
+        vid_pkg_path = self.vids_pkg[index]
+        label = self.labels[index]
+        vid_imgs = sorted(os.listdir(vid_pkg_path))
+        
+        if len(vid_imgs) < self.vids_pkg_size:
+            logger.error(vid_pkg_path + " is not have enghout image!!!")
+            sys.exit()
+        vid_imgs = vid_imgs[:self.vids_pkg_size]
+        
+        pkg = []
+        for vid_img in vid_imgs:
+            inst = util.img_read(os.path.join(vid_pkg_path, vid_img))
+            if inst == None:
+                sys.exit(1)
+            pkg.append(inst)
+        #the data form is T C H W
+        pkg = torch.stack(pkg, dim=0)
         return pkg, label
 
         

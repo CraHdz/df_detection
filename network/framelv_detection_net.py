@@ -11,14 +11,36 @@ class SeparableConv2d(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size=1, stride=1, padding=0, dilation=1, bias=False):
         super(SeparableConv2d, self).__init__()
 
-        self.conv1 = nn.Conv2d(in_channels, in_channels, kernel_size, stride, padding, dilation, groups=in_channels, bias=bias)
-        self.pointwise = nn.Conv2d(in_channels, out_channels, 1, 1, 0, 1, 1, bias=bias)
+        self.conv1 = Conv2d_cd(in_channels, in_channels, kernel_size, stride, padding, dilation, groups=in_channels, bias=bias)
+        self.pointwise = Conv2d_cd(in_channels, out_channels, 1, 1, 0, 1, 1, bias=bias)
+        # self.conv1 = nn.Conv2d(in_channels, in_channels, kernel_size, stride, padding, dilation, groups=in_channels, bias=bias)
+        # self.pointwise = nn.Conv2d(in_channels, out_channels, 1, 1, 0, 1, 1, bias=bias)
+
 
     def forward(self, x):
         x = self.conv1(x)
         x = self.pointwise(x)
         return x
 
+class Conv2d_cd(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1,
+                 padding=1, dilation=1, groups=1, bias=False, theta=0.7):
+
+        super(Conv2d_cd, self).__init__() 
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, padding=padding, dilation=dilation, groups=groups, bias=bias)
+        self.theta = theta
+
+    def forward(self, x):
+        out_normal = self.conv(x)
+        if math.fabs(self.theta - 0.0) < 1e-8:
+            return out_normal 
+        else:
+            # [C_out,C_in, kernel_size,kernel_size] = self.conv.weight.shape
+            kernel_diff = self.conv.weight.sum(2).sum(2)
+            kernel_diff = kernel_diff[:, :, None, None]
+            out_diff = F.conv2d(input=x, weight=kernel_diff, bias=self.conv.bias, stride=self.conv.stride, padding=0, groups=self.conv.groups)
+
+            return out_normal - self.theta * out_diff
 
 class Block(nn.Module):
     def __init__(self, in_filters, out_filters, reps, strides=1, start_with_relu=True, grow_first=True):
@@ -124,7 +146,7 @@ class AttentionBlock(nn.Module):
 
 class framelv_detection_net(nn.Module):
 
-    def __init__(self):
+    def __init__(self, vids_size):
     
         super(framelv_detection_net, self).__init__()
 
@@ -140,28 +162,27 @@ class framelv_detection_net(nn.Module):
         self.block9=Block(728, 728, 3, 1, start_with_relu=True, grow_first=True)
         self.block10=Block(728, 728, 3, 1, start_with_relu=True, grow_first=True)
 
-        self.block11=Block(728,  256,  2,  2, start_with_relu=True, grow_first=False)
+        self.block11=Block(728,  512,  2,  2, start_with_relu=True, grow_first=False)
 
-        self.fc1 = nn.Sequential(
-            nn.Linear(256*7*7, 512), 
-            nn.ReLU(True)
+        self.conv1 = nn.Sequential(
+            nn.Conv2d(512, 512, 7, 1), 
+            nn.BatchNorm2d(512)
         )
 
         self.attention1 = AttentionBlock()
 
-        self.fc2 = nn.Sequential(
-            nn.Linear(512, 16), 
+        self.fc1 = nn.Sequential(
+            nn.Linear(512, int(512 / vids_size)), 
             nn.ReLU(True)
         )
-
         self.attention2 = AttentionBlock()
 
-        self.fc3 = nn.Sequential(
+        self.fc2 = nn.Sequential(
             nn.Linear(512, 128), 
             nn.ReLU(True)
         )
 
-        self.fc4 = nn.Linear(128, 2)
+        self.fc3 = nn.Linear(128, 2)
 
         self.initialize_weights()
         
@@ -177,7 +198,7 @@ class framelv_detection_net(nn.Module):
             elif isinstance(m, nn.Linear):
                 torch.nn.init.xavier_uniform_(m.weight)
                 if m.bias is not None:
-                    torch.nn.init.constant_(m.bias, 0)
+                    torch.nn.init.constant_(m.bias.data, 0)
 
     def get_key_value(self, x):
         x = x.clone().detach_()
@@ -203,21 +224,20 @@ class framelv_detection_net(nn.Module):
         out = self.block10(out)
         out = self.block11(out)
 
-        out = out.view(out.size(0), -1)
-        out = self.fc1(out)
+        out = self.conv1(out) 
 
         out = out.view(b, t, -1)
 
         key_value = self.get_key_value(out)
         out = self.attention1(out, key_value)
-        out = self.fc2(out)
+        out = self.fc1(out)
 
         out = out.view(b, 1, -1)
         out = self.attention2(out)
 
         out = out.view(b, -1)
+        out = self.fc2(out)
         out = self.fc3(out)
-        out = self.fc4(out)
         return out
 
 def get_parameter_number(net):
@@ -233,12 +253,12 @@ def gram_matrix(y):
         return gram
 
 if __name__ == "__main__":
-    net = framelv_detection_net()
+    net = framelv_detection_net(16)
     # input = torch.randn(32, 24, 224, 224)
     # print(get_parameter_number(net))
     # net = framelv_detection_net()
     for i in range(2):
-        input = torch.randn(1, 32, 3, 224, 224)
+        input = torch.randn(1, 16, 3, 224, 224)
         result = net(input)
         print(result.shape)
     

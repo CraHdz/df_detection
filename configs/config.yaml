@@ -11,26 +11,29 @@ is_DDP : false
 model_save_path : "./network/ckp/"
 
 is_load_ckp : false
-ckp_file : "./network/ckp/"
+ckp_file : "./network/ckp/ckp_500.pth"
 
 epoches: 10000
 
+vids_pkg_size : 16
 metalearning :
     meta_train_batch_size : 32
     meta_test_batch_size : 16
 
+
     meta_train_lr : 0.001
-    meta_train_weight_decay : 0 
-    meta_train_momentum : 0
+    meta_train_momentum : 0.9
+    meta_train_weight_decay : 0.5
+    
 
-    meta_lr : 0.0001
-    meta_momentum : 0.9
-    meta_dampening : 0.5
+    meta_lr : 0.01
+    meta_momentum : 0.
+    meta_dampening : 0.
 
-    alpha : 0.1
+    alpha : 0.2
 
     MSTX :
-        t_size : 32
+        vids_size : 16
         img_size : 224
         vst_weight_path : "/home/huangdz/workspace/df_detection/weights/video_swin_transformer.pth"  
 video_process :
@@ -49,13 +52,15 @@ vst_net :
     checkpoint : "./weights/"
 
 train :
-    meta_train_dataset : ["./FF++/raw", "./FF++/face2face", "./FF++/faceswap", "./FF++/neuraltextures"]
+    meta_train_dataset : ["./FF++/raw", "./cele_df/raw", "./FF++/face2face", "./FF++/faceswap", "./FF++/neuraltextures", "./FF++/deepfakes"]
     meta_test_dataset: ["./FF++/raw", "./FF++/face2face", "./FF++/faceswap", "./FF++/neuraltextures", "./FF++/deepfakes"]
+    # meta_test_dataset: ["./FF++/raw",]
     train_batch_size : 1
     test_batch_size : 1
 
 test :
-    dataset : []
+    # test_dataset: ["./cele_df/raw", "./cele_df/synthesis"]
+    test_dataset: ["./FF++/face2face", "./FF++/faceswap",]
 
 valid :
     batch_size : 1

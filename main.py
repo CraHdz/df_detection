@@ -5,6 +5,8 @@ from data_manager import VideoProcess
 import torch.utils.data as data
 from data_manager import Meta_Train_Dataset
 from network.meta_learning import MetaLearner
+from network.MSTX_net import MSTX
+from data_manager import Nor_Dataset
 import shutil
 import torch
 from torch import nn
@@ -16,51 +18,106 @@ import torch.utils.data.distributed
 from torch.multiprocessing import Process
 
 from torch.utils.tensorboard import SummaryWriter
-import sys
 
 def start(config, rank=None):
+    print("init logger")
     logger(config.log_dir)
 
     device = torch.device(config.device)
 
     if config.mode == "train":
+        torch.backends.cudnn.enabled = True
+        torch.backends.cudnn.benchmark = True
+
         epoches = config.epoches
         model_save_path = config.model_save_path
 
         train_config = config.train
-        meta_train_loaders = get_data_loader(train_config.meta_train_dataset, train_config.train_batch_size, "train", rank)
-        meta_test_loaders = get_data_loader(train_config.meta_test_dataset, train_config.test_batch_size, "test", rank)
 
-        meta_learner = MetaLearner(config.metalearning, meta_train_loaders, meta_test_loaders, device)
+        if rank is not None:
+            dist.init_process_group("gloo", rank=rank, world_size=2)
+            torch.cuda.set_device(rank)
+        
+        print("init loader and net")
+        meta_train_loaders = get_data_loader(train_config.meta_train_dataset, train_config.train_batch_size, "train", config.vids_pkg_size, rank)
+        meta_test_loaders = get_data_loader(train_config.meta_test_dataset, train_config.test_batch_size, "test", config.vids_pkg_size, rank)
+        meta_learner = MetaLearner(config.metalearning, meta_train_loaders, meta_test_loaders, device, epoches)
 
-        print(get_parameter_number(meta_learner))
+        print("init tensorboard")
         writer = SummaryWriter(config.tensorb_log)
         if rank is not None:
-            dist.init_process_group("gloo", rank=rank, world_size=3)
-            torch.cuda.set_device(rank)
             meta_learner = torch.nn.parallel.DistributedDataParallel(meta_learner, device_ids=[rank])
 
         meta_learner = meta_learner.to(device)
         print("start training")
         loss_iter, loss_train, loss_test = 0, 0, 0
-        for i in range(epoches):
-            loss_meta_iter, loss_meta_train, loss_meta_test = meta_learner()
+        for epoch in range(epoches):
+            loss_meta_iter, loss_meta_train, loss_meta_test = meta_learner(epoch)
             logger.info("loss_meta_iter:" + str(loss_meta_iter) + ", loss_meta_train:" + str(loss_meta_train) + ", loss_meta_test:" + str(loss_meta_test))
             loss_iter = loss_iter + loss_meta_iter
             loss_train = loss_train + loss_meta_train
             loss_test = loss_test + loss_meta_test
-            if i % 10 == 0:
-                writer.add_scalar('loss/loss_meta_iter', loss_iter, i / 5)
-                writer.add_scalar('loss/loss_meta_train', loss_train, i / 5)
-                writer.add_scalar('loss/loss_meta_test', loss_test, i / 5)
-                loss_iter, loss_train, loss_test = 0, 0 , 0
 
-            if i % 100 == 0:
-                model_save_path = os.path.join(model_save_path, "ckp_{}.pth".format(str(i)))
-                meta_learner.save_model() 
+            if epoch % 10 == 0 and epoch != 0:
+                writer.add_scalar('loss/loss_meta_iter', loss_iter, epoch / 10)
+                writer.add_scalar('loss/loss_meta_train', loss_train, epoch / 10)
+                writer.add_scalar('loss/loss_meta_test', loss_test, epoch / 10)
+                loss_iter, loss_train, loss_test = 0, 0, 0
+
+            if epoch % 500 == 0 and epoch != 0:
+                ckp_path = os.path.join(model_save_path, "ckp_{}.pth".format(str(epoch)))
+                meta_learner.save_model(ckp_path) 
     
     elif config.mode == "test":
-        pass 
+        print("test start")
+        model = MSTX(config.metalearning.MSTX)
+
+        model.load_state_dict(torch.load(config.ckp_file))
+        model.to(device)
+        model.eval()
+        
+        data_set = Nor_Dataset(config.test.test_dataset, "test")
+
+        
+        data_loader = data.DataLoader(
+            data_set, 
+            batch_size=1, 
+            num_workers=0,
+            shuffle=False,
+            drop_last=True,
+
+        )
+
+        n_classes = 2
+        acc_num = 0
+        target_num = torch.zeros((1, n_classes)) # n_classes为分类任务类别数量
+        predict_num = torch.zeros((1, n_classes))
+        acc_num = torch.zeros((1, n_classes))
+        with torch.no_grad():
+            for index, (frams, label) in enumerate(data_loader):
+                frams = frams.to(device)
+                label = label.to(device)
+                outputs = model(frams)
+                print(outputs)
+                loss = F.cross_entropy(outputs, label)
+
+                _, predicted = outputs.max(1)
+                if predicted.item() != label.item():
+                    print("index" + str(index) + "  : " + str(predicted.item()) + ":" + str(label.item())) 
+                pre_mask = torch.zeros(outputs.size()).scatter_(1, predicted.cpu().view(-1, 1), 1.)
+                predict_num += pre_mask.sum(0)  # 得到数据中每类的预测量
+                tar_mask = torch.zeros(outputs.size()).scatter_(1, label.data.cpu().view(-1, 1), 1.)
+                target_num += tar_mask.sum(0)  # 得到数据中每类的数量
+                acc_mask = pre_mask * tar_mask 
+                acc_num += acc_mask.sum(0) # 得到各类别分类正确的样本数量
+
+            print("test finish")
+            recall = acc_num / target_num
+            precision = acc_num / predict_num
+            F1 = 2 * recall * precision / (recall + precision)
+            accuracy = 100. * acc_num.sum(1) / target_num.sum(1)
+            print('Test Acc {}, recal {}, precision {}, F1-score {}'.format(accuracy, recall, precision, F1))
+
     elif config.mode == "process":
         vid_process = VideoProcess(config.video_process)
         vid_process.process()
@@ -83,24 +140,24 @@ def get_parameter_number(net):
 #     def forward(self,x):
 #         return self.out(F.relu(self.hidden(x)))
 
-# def mksure_data(dataset_path_list):
-#     for dataset_path in dataset_path_list:
-#         vids_pkg = sorted(os.listdir(dataset_path))
-#         print(len(vids_pkg))
-#         for vid_pkg in vids_pkg:
-#             vid_pkg_path = os.path.join(dataset_path, vid_pkg)
-#             vid_imgs = os.listdir(vid_pkg_path)
-#             if len(vid_imgs) != 32:
-#                 logger.error(vid_pkg_path + " is not have enghout image!!!")
-#                 shutil.rmtree(vid_pkg_path)
+def mksure_data(dataset_path_list):
+    for dataset_path in dataset_path_list:
+        vids_pkg = sorted(os.listdir(dataset_path))
+        print(len(vids_pkg))
+        for vid_pkg in vids_pkg:
+            vid_pkg_path = os.path.join(dataset_path, vid_pkg)
+            vid_imgs = os.listdir(vid_pkg_path)
+            if len(vid_imgs) != 32:
+                logger.error(vid_pkg_path + " is not have enghout image!!!")
+                shutil.rmtree(vid_pkg_path)
 
 # def prepare(config):
 #     pass
 
-def get_data_loader(dataset_path_list, batch_size, mode, rank):
+def get_data_loader(dataset_path_list, batch_size, mode, vids_pkg_size, rank):
     loaders_list = []
     for dataset_path in dataset_path_list:
-        data_set = Meta_Train_Dataset(dataset_path, mode)
+        data_set = Meta_Train_Dataset(dataset_path, mode, vids_pkg_size)
         if rank is None:
             sampler = None
         else: 
@@ -124,7 +181,7 @@ def main():
     if config.is_DDP:
 
         os.environ['MASTER_ADDR'] = 'localhost'
-        os.environ['MASTER_PORT'] = '12855'
+        os.environ['MASTER_PORT'] = '18888'
 
         size = 2
         processes = []
